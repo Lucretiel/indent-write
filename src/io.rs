@@ -54,7 +54,7 @@ impl<W: io::Write> IndentableWrite for W {
     ) -> IndentedWrite<Self> {
         IndentedWrite {
             unprocessed_user_suffix: ArrayVec::new(),
-            helper: IndentedWriteHelper {
+            str_writer: IndentedStrWrite {
                 writer: self,
                 prefix,
                 unwritten_continuation_bytes: ArrayVec::new(),
