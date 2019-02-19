@@ -75,6 +75,10 @@ impl<W: io::Write> IndentableWrite for W {
 #[derive(Debug, Clone)]
 struct IndentedStrWrite<'a, W> {
     writer: W,
+
+    // FIXME: We never actually validate that prefix is valid UTF-8, since it's
+    // basically deterministic when to insert it. Figure out if we should require
+    // this to be a str anyway.
     prefix: &'a [u8],
 
     // In the event that the underlying writer successfully writes only part
