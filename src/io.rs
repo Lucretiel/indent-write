@@ -67,7 +67,7 @@ impl<W: io::Write> IndentableWrite for W {
 }
 
 // We have to separate the implementation of IndentedWrite into a separate struct,
-// called IndentedWriteHelper, because part of the implementation of IndentedWrite::write
+// called IndentedStrWrite, because part of the implementation of IndentedWrite::write
 // calls the function write_str (which takes a mutable reference) using the contents of
 // unprocessed_user_suffix. This could violate the borrow checker, so we split
 // unprocessed_user_suffix into a separate struct, so that the mutable self in write_str doesn't
@@ -77,12 +77,10 @@ struct IndentedStrWrite<'a, W> {
     writer: W,
     prefix: &'a [u8],
 
-    // TODO: replace these microbuffers with arrayvec storage.
-
     // In the event that the underlying writer successfully writes only part
     // of a code point, store the unwritten bytes here, so we can try to write
     // them next time.
-    unwritten_continuation_bytes: ArrayVec<[u8; 4]>,
+    unwritten_continuation_bytes: ArrayVec<[u8; 3]>,
 
     // True if we need to insert an indent before our next write
     insert_indent: bool,
@@ -100,10 +98,8 @@ impl<'a, W: io::Write> IndentedStrWrite<'a, W> {
             match self.writer.write(&self.unwritten_continuation_bytes) {
                 Err(err) => return Err(err),
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-                Ok(len) => {
-                    self.unwritten_continuation_bytes.drain(..len);
-                }
-            }
+                Ok(len) => self.unwritten_continuation_bytes.drain(..len),
+            };
         }
         Ok(())
     }
