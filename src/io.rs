@@ -117,10 +117,10 @@ impl<'a, W: io::Write> IndentedStrWrite<'a, W> {
     // success, which means we need to return early on partial success, just in
     // case a subsequent write call will contain an error.
     //
-    // In order to guarentee that all bytes passed to IndentedWrite::write are aligned
-    // UTF-8 content (that is, they never start with continuation bytes), this function
-    // stores unwritten continuation bytes to unwritten_continuation_bytes and reports
-    // them as having been written to the caller.
+    // In order to guarentee that this method never writes a partial code point,
+    // unwritten continuation bytes (that is, continuation bytes that were not
+    // written by self.writer.write) are stored in unwritten_continuation_bytes
+    // and reported to the caller as written
     fn write_str(&mut self, buf: &str) -> io::Result<usize> {
         self.flush_continuation_bytes()?;
 
@@ -157,7 +157,7 @@ impl<'a, W: io::Write> IndentedStrWrite<'a, W> {
             }
         };
 
-        let unwritten_part = &buf_bytes[written..];
+        let unwritten_part = unsafe {  buf_bytes.get_unchecked(written..) };
         // If there are any unwritten continuation bytes, add them
         // to unwritten_continuation_bytes.
         for &b in unwritten_part {
