@@ -137,3 +137,5 @@ fn test_partial_writes_combined() {
         Ok("    Hello, World\n    😀 😀 😀\n    😀 😀 😀\n")
     );
 }
+
+// TODO: test the error cases
