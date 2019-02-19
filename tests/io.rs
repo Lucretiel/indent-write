@@ -126,10 +126,10 @@ fn test_partial_simple_indent_writes_inverted() {
 
 #[test]
 fn test_partial_writes_combined() {
-	let mut dest = Vec::new();
-	{
-		let mut writer = OneByteAtATime(OneByteAtATime(&mut dest).indent_with(b"    "));
-		write!(writer, "{}\n", "Hello, World").unwrap();
+    let mut dest = Vec::new();
+    {
+        let mut writer = OneByteAtATime(OneByteAtATime(&mut dest).indent_with(b"    "));
+        write!(writer, "{}\n", "Hello, World").unwrap();
         write!(writer, "{}\n", "😀 😀 😀\n😀 😀 😀").unwrap();
     }
     assert_eq!(

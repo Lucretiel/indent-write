@@ -161,7 +161,7 @@ impl<'a, W: io::Write> IndentedStrWrite<'a, W> {
             }
         };
 
-        let unwritten_part = unsafe {  buf_bytes.get_unchecked(written..) };
+        let unwritten_part = unsafe { buf_bytes.get_unchecked(written..) };
         // If there are any unwritten continuation bytes, add them
         // to unwritten_continuation_bytes.
         for &b in unwritten_part {
@@ -324,7 +324,18 @@ mod tests {
                 Ok(_) => assert!(false),
                 Err(err) => {
                     assert_eq!(err.valid_up_to(), 1);
-                    assert_eq!(err.error_len(), Some(1));
+                    assert!(err.error_len().is_some());
+                }
+            }
+        }
+
+        #[test]
+        fn test_bad_unicode() {
+            match partial_from_utf8(&[0x61, 0xF0, 0x9F, 0xF0]) {
+                Ok(_) => assert!(false),
+                Err(err) => {
+                    assert_eq!(err.valid_up_to(), 1);
+                    assert!(err.error_len().is_some());
                 }
             }
         }
