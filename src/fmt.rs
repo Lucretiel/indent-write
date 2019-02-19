@@ -70,20 +70,19 @@ impl<'a, W: fmt::Write> fmt::Write for IndentedWrite<'a, W> {
 			self.is_trimming_indents = false
 		}
 
-		if self.insert_indent {
-			self.writer.write_str(self.prefix)?;
-			self.insert_indent = false;
-		}
+		while !buf.is_empty() {
+			if self.insert_indent {
+				self.writer.write_str(self.prefix)?;
+				self.insert_indent = false;
+			}
 
-		loop {
 			// This increment is safe because string lengths must fit in a usize, so
 			// the index of the newline character is necessarily less than USIZE_MAX
 			match buf.find('\n').map(|idx| idx + 1) {
-				None => break self.writer.write_str(buf),
+				None => return self.writer.write_str(buf),
 				Some(newline_boundary) => {
-					let upto_newline = unsafe { buf.get_unchecked(..newline_boundary) };
-					self.writer.write_str(upto_newline)?;
-
+					self.writer.write_str(unsafe { buf.get_unchecked(..newline_boundary) })?;
+					self.insert_indent = true;
 					buf = unsafe { buf.get_unchecked(newline_boundary..) };
 
 					if self.trim_user_indents {
@@ -92,15 +91,10 @@ impl<'a, W: fmt::Write> fmt::Write for IndentedWrite<'a, W> {
 							self.is_trimming_indents = true;
 						}
 					}
-
-					if buf.is_empty() {
-						self.insert_indent = true;
-						return Ok(());
-					}
-
-					self.writer.write_str(self.prefix)?;
 				}
 			}
 		}
+
+		Ok(())
 	}
 }
