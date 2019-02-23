@@ -41,17 +41,31 @@ macro_rules! test_harness {
 
 #[test]
 fn basic_test() {
-    test_harness!(w => w.indent(), expect: "\t\t😀 😀 😀\n\t\t\t😀 😀 😀\n\t\t😀 😀 😀\n");
+    let mut dest = Vec::new();
+
+    {
+        let writer = &mut dest;
+        let mut indented_dest = writer.indent();
+        for line in CONTENT {
+            write!(&mut indented_dest, "{}\n", line).unwrap();
+        }
+    }
+
+    let result = from_utf8(&dest).expect("Wrote invalid utf8 to dest");
+    assert_eq!(
+        result,
+        "\t\t😀 😀 😀\n\t\t\t😀 😀 😀\n\t\t😀 😀 😀\n"
+    );
 }
 
 #[test]
 fn test_prefix() {
-    test_harness!(w => w.indent_with(b"    "), expect: "    \t😀 😀 😀\n    \t\t😀 😀 😀\n    \t😀 😀 😀\n")
+    test_harness!(w => w.indent_with("    "), expect: "    \t😀 😀 😀\n    \t\t😀 😀 😀\n    \t😀 😀 😀\n")
 }
 
 #[test]
 fn test_strip_indent() {
-    test_harness!(w => w.indent_with_rules(b"\t", true, true), expect: "\t😀 😀 😀\n\t😀 😀 😀\n\t😀 😀 😀\n")
+    test_harness!(w => w.indent_with_rules("\t", true, true), expect: "\t😀 😀 😀\n\t😀 😀 😀\n\t😀 😀 😀\n")
 }
 
 #[test]
@@ -128,7 +142,7 @@ fn test_partial_simple_indent_writes_inverted() {
 fn test_partial_writes_combined() {
     let mut dest = Vec::new();
     {
-        let mut writer = OneByteAtATime(OneByteAtATime(&mut dest).indent_with(b"    "));
+        let mut writer = OneByteAtATime(OneByteAtATime(&mut dest).indent_with("    "));
         write!(writer, "{}\n", "Hello, World").unwrap();
         write!(writer, "{}\n", "😀 😀 😀\n😀 😀 😀").unwrap();
     }
@@ -138,4 +152,23 @@ fn test_partial_writes_combined() {
     );
 }
 
-// TODO: test the error cases
+#[test]
+fn test_edge_case_ordering_1() {
+    // An old version of the code would report success if you submitted 0b1111_0xxx
+    // in a single write, followed by another leading byte. Check this.
+    let mut dest = Vec::new();
+    let content = "😀";
+    let content_bytes = content.as_bytes();
+    {
+        let mut writer = (&mut dest).indent_with("");
+        match writer.write(&content_bytes[..2]) {
+            Ok(count) => assert_eq!(count, 2),
+            Err(err) => panic!("Write shouldn't have failed (error: {:?})", err),
+        }
+        match writer.write(content_bytes) {
+            Ok(count) => panic!("Write shouldn't have succeeded (count: {})", count),
+            Err(err) => assert_eq!(err.kind(), io::ErrorKind::InvalidData),
+        };
+    }
+    assert_eq!(dest, &[]);
+}
