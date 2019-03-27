@@ -1,3 +1,5 @@
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
 use std::io;
 use std::str::{from_utf8, from_utf8_unchecked, Utf8Error};
 
@@ -25,12 +27,50 @@ fn partial_from_utf8(buf: &[u8]) -> Result<(&str, &[u8]), Utf8Error> {
     }
 }
 
+// This wrapper for Utf8Error adjusts the reported offsets to be consistent
+// with data passed by the user
+#[derive(Debug, Clone)]
+struct AdjustedUtf8Error {
+    error: Utf8Error,
+    offset: usize,
+}
+
+impl AdjustedUtf8Error {
+    fn valid_up_to(&self) -> usize {
+        self.error.valid_up_to() - self.offset
+    }
+
+    fn error_len(&self) -> Option<usize> {
+        self.error.error_len().map(move |len| len - self.offset)
+    }
+}
+
+impl Display for AdjustedUtf8Error {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self.error_len() {
+            Some(error_len) => write!(
+                f,
+                "invalid utf-8 sequence of {} bytes from index {}",
+                error_len,
+                self.valid_up_to()
+            ),
+            None => write!(
+                f,
+                "incomplete utf-8 byte sequence from index {}",
+                self.valid_up_to()
+            ),
+        }
+    }
+}
+
+impl Error for AdjustedUtf8Error {
+    fn cause(&self) -> Option<&dyn Error> {
+        Some(&self.error)
+    }
+}
+
 pub trait IndentableWrite: Sized + io::Write {
-    fn indent_with_rules(
-        self,
-        prefix: &str,
-        initial_indent: bool,
-    ) -> IndentedWrite<Self>;
+    fn indent_with_rules(self, prefix: &str, initial_indent: bool) -> IndentedWrite<Self>;
 
     #[inline]
     fn indent_with(self, prefix: &str) -> IndentedWrite<Self> {
@@ -44,11 +84,7 @@ pub trait IndentableWrite: Sized + io::Write {
 }
 
 impl<W: io::Write> IndentableWrite for W {
-    fn indent_with_rules(
-        self,
-        prefix: &str,
-        initial_indent: bool,
-    ) -> IndentedWrite<Self> {
+    fn indent_with_rules(self, prefix: &str, initial_indent: bool) -> IndentedWrite<Self> {
         IndentedWrite {
             unprocessed_user_suffix: ArrayVec::new(),
             str_writer: IndentedStrWrite {
@@ -224,31 +260,43 @@ impl<'a, W: io::Write> io::Write for IndentedWrite<'a, W> {
         } else {
             let original_unprocessed_len = self.unprocessed_user_suffix.len();
             self.unprocessed_user_suffix.extend(buf.iter().cloned());
+
             match partial_from_utf8(&self.unprocessed_user_suffix) {
+                // The new bytes were bad. Truncate them and return the error.
                 Err(err) => {
-                    // The new bytes were bad. Truncate them and return the error.
-                    self.unprocessed_user_suffix.truncate(original_unprocessed_len);
-                    Err(io::Error::new(io::ErrorKind::InvalidData, err))
+                    self.unprocessed_user_suffix
+                        .truncate(original_unprocessed_len);
+
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        AdjustedUtf8Error {
+                            error: err,
+                            offset: original_unprocessed_len,
+                        },
+                    ))
                 }
-                Ok(("", suffix)) => {
-                    // The new bytes were good, but not enough for a code point.
-                    // Mark them as written (since we put them in the buffer)
-                    Ok(suffix.len() - original_unprocessed_len)
-                }
+
+                // The new bytes were good, but not enough for a code point.
+                // Mark them as written (since we put them in the buffer)
+                Ok(("", suffix)) => Ok(suffix.len() - original_unprocessed_len),
+
+                // We have 1 or more code points! Try to write them
                 Ok((data, _)) => match self.str_writer.write_str(data) {
+                    // We successfully wrote something
                     Ok(written) if written > 0 => {
-                        // We successfully wrote a code point!
                         self.unprocessed_user_suffix.clear();
                         Ok(written - original_unprocessed_len)
                     }
+
+                    // Failed to write the new bytes. We can't report them
+                    // as having been written, since we need to pass our
+                    // error back to the caller, so truncate.
                     result => {
-                        // Failed to write the new bytes. We can't report them
-                        // as having been written, since we need to pass our
-                        // error back to the caller, so truncate.
-                        self.unprocessed_user_suffix.truncate(original_unprocessed_len);
+                        self.unprocessed_user_suffix
+                            .truncate(original_unprocessed_len);
                         result
                     }
-                }
+                },
             }
         }
     }
