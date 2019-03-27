@@ -30,12 +30,11 @@ pub trait IndentableWrite: Sized + io::Write {
         self,
         prefix: &str,
         initial_indent: bool,
-        trim_user_indents: bool,
     ) -> IndentedWrite<Self>;
 
     #[inline]
     fn indent_with(self, prefix: &str) -> IndentedWrite<Self> {
-        self.indent_with_rules(prefix, true, false)
+        self.indent_with_rules(prefix, true)
     }
 
     #[inline]
@@ -49,7 +48,6 @@ impl<W: io::Write> IndentableWrite for W {
         self,
         prefix: &str,
         initial_indent: bool,
-        trim_user_indents: bool,
     ) -> IndentedWrite<Self> {
         IndentedWrite {
             unprocessed_user_suffix: ArrayVec::new(),
@@ -62,8 +60,6 @@ impl<W: io::Write> IndentableWrite for W {
                 } else {
                     &[]
                 },
-                trim_user_indents,
-                is_trimming_indents: trim_user_indents && initial_indent,
             },
         }
     }
@@ -79,29 +75,23 @@ impl<W: io::Write> IndentableWrite for W {
 struct IndentedStrWrite<'a, W: io::Write> {
     writer: W,
 
-    // FIXME: We never actually validate that prefix is valid UTF-8, since it's
-    // basically deterministic when to insert it. Figure out if we should require
-    // this to be a str anyway.
-    prefix: &'a str,
-
     // In the event that the underlying writer successfully writes only part
     // of a code point, store the unwritten bytes here, so we can try to write
     // them next time.
     unwritten_continuation_bytes: ArrayVec<[u8; 3]>,
 
+    // FIXME: We never actually validate that prefix is valid UTF-8, since it's
+    // basically deterministic when to insert it. Figure out if we should require
+    // this to be a str anyway.
+    prefix: &'a str,
+
     // If this is not empty, it is a (potentially partial) prefix we need to insert
     // before any of our next writes
     unwritten_prefix: &'a [u8],
-
-    // True if we want to strip any user-provided indentation.
-    trim_user_indents: bool,
-
-    // True if we're in the middle of stripping off a user indent.
-    is_trimming_indents: bool,
 }
 
 impl<'a, W: io::Write> IndentedStrWrite<'a, W> {
-    fn flush(&mut self) -> io::Result<()> {
+    fn flush_unwritten(&mut self) -> io::Result<()> {
         while !self.unwritten_continuation_bytes.is_empty() {
             match self.writer.write(&self.unwritten_continuation_bytes) {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
@@ -111,13 +101,14 @@ impl<'a, W: io::Write> IndentedStrWrite<'a, W> {
             };
         }
 
-        // Right now, we don't flush the unwritten_prefix, because we haven't
-        // made any promises to the client that it's been written, and as a rule
-        // we want to be as conservative as possible when it comes to writing the
-        // prefix.
+        Ok(())
+    }
 
+    fn flush(&mut self) -> io::Result<()> {
+        self.flush_unwritten()?;
         self.writer.flush()
     }
+
     // Write a string to the writer. This method allows us to separate the
     // complicated bytes <-> UTF-8 logic from the slightly less complicated
     // indentation logic. Returns the number of bytes written, which is guarenteed
@@ -133,17 +124,6 @@ impl<'a, W: io::Write> IndentedStrWrite<'a, W> {
     // written by self.writer.write) are stored in unwritten_continuation_bytes
     // and reported to the caller as written
     fn write_str(&mut self, buf: &str) -> io::Result<usize> {
-        // "Write" the indent. Trimming means that we don't write those bytes to
-        // the underlying writer, but we still have to report them as written to
-        // the user.
-        if self.is_trimming_indents {
-            let trimmed = buf.trim_start();
-            if trimmed.len() != buf.len() {
-                return Ok(buf.len() - trimmed.len());
-            }
-            self.is_trimming_indents = false;
-        }
-
         // A note on ordering: it shouldn't be possible for bot unwritten_continuation_bytes
         // and unwritten_prefix to be non empty, so it doesn't matter what order these
         // two while loops happen in.
@@ -177,9 +157,6 @@ impl<'a, W: io::Write> IndentedStrWrite<'a, W> {
 
                 if written == upto_newline.len() {
                     self.unwritten_prefix = self.prefix.as_bytes();
-                    if self.trim_user_indents {
-                        self.is_trimming_indents = true;
-                    }
                     // We can return early cause we know that what was written
                     // was a whole number of code points, since it's precisely
                     // the length of upto_newline.
@@ -198,7 +175,7 @@ impl<'a, W: io::Write> IndentedStrWrite<'a, W> {
             buf_bytes[written..]
                 .iter()
                 .cloned()
-                .take_while(|&b| b >= 0b1000_0000 && b <= 0b1011_1111),
+                .take_while(|&b| b & 0b1100_0000 == 0b1000_0000),
         );
         written += self.unwritten_continuation_bytes.len();
 
@@ -208,11 +185,9 @@ impl<'a, W: io::Write> IndentedStrWrite<'a, W> {
 
 impl<'a, W: io::Write> Drop for IndentedStrWrite<'a, W> {
     fn drop(&mut self) {
-        let _result = self.flush();
+        let _result = self.flush_unwritten();
     }
 }
-// TODO: add a Drop implementation. Is it appropriate to allow unprocessed_user_suffix
-// to be silently dropped, even though we previously indicated a successful write?
 
 // TODO: We can probably rename this to something like "Uft8Writer", since none of
 // the logic in this struct has anything to do with the indentation part (it's all tied
@@ -237,71 +212,42 @@ impl<'a, W: io::Write> io::Write for IndentedWrite<'a, W> {
             return Ok(0);
         }
 
-        match self.unprocessed_user_suffix.first().cloned() {
-            None => match partial_from_utf8(buf) {
-                // At this point, since unprocessed_user_suffix is empty, the incoming
-                // bytes should be valid UTF-8, possibly cut off in the middle of a code point.
+        if self.unprocessed_user_suffix.is_empty() {
+            match partial_from_utf8(buf) {
                 Ok(("", suffix)) => {
                     self.unprocessed_user_suffix.extend(suffix.iter().cloned());
                     Ok(suffix.len())
                 }
                 Ok((valid_utf8, _)) => self.str_writer.write_str(valid_utf8),
                 Err(err) => Err(io::Error::new(io::ErrorKind::InvalidData, err)),
-            },
-            Some(b) => {
-                let current_length = self.unprocessed_user_suffix.len();
-                let target_length = match b & 0b1111_0000 {
-                    0b1100_0000 => 2,
-                    0b1110_0000 => 3,
-                    0b1111_0000 => 4,
-                    _ => unreachable!(
-                        "unprocessed_user_suffix has an invalid leading UTF-8 byte: {:#X}",
-                        b
-                    ),
-                };
-                self.unprocessed_user_suffix
-                    .extend(buf.iter().take(target_length - current_length).cloned());
-
-                match partial_from_utf8(&self.unprocessed_user_suffix) {
-                    Err(err) => {
-                        // In this case, the new bytes were invalid. Truncate them and return the error.
-                        self.unprocessed_user_suffix.truncate(current_length);
-
-                        // TODO: this err is based on invisible state in the Writer, is it
-                        // appropriate to include it?
-                        Err(io::Error::new(io::ErrorKind::InvalidData, err))
+            }
+        } else {
+            let original_unprocessed_len = self.unprocessed_user_suffix.len();
+            self.unprocessed_user_suffix.extend(buf.iter().cloned());
+            match partial_from_utf8(&self.unprocessed_user_suffix) {
+                Err(err) => {
+                    // The new bytes were bad. Truncate them and return the error.
+                    self.unprocessed_user_suffix.truncate(original_unprocessed_len);
+                    Err(io::Error::new(io::ErrorKind::InvalidData, err))
+                }
+                Ok(("", suffix)) => {
+                    // The new bytes were good, but not enough for a code point.
+                    // Mark them as written (since we put them in the buffer)
+                    Ok(suffix.len() - original_unprocessed_len)
+                }
+                Ok((data, _)) => match self.str_writer.write_str(data) {
+                    Ok(written) if written > 0 => {
+                        // We successfully wrote a code point!
+                        self.unprocessed_user_suffix.clear();
+                        Ok(written - original_unprocessed_len)
                     }
-                    Ok(("", _)) => {
-                        // In this case, we didn't have enough new data. Mark the bytes as written
-                        // (since we put them in the unprocessed_user_suffix)
-                        Ok(self.unprocessed_user_suffix.len() - current_length)
+                    result => {
+                        // Failed to write the new bytes. We can't report them
+                        // as having been written, since we need to pass our
+                        // error back to the caller, so truncate.
+                        self.unprocessed_user_suffix.truncate(original_unprocessed_len);
+                        result
                     }
-                    Ok((data, &[])) => match self.str_writer.write_str(data) {
-                        Ok(written) if written > 0 => {
-                            // It shouldn't be possible for written to be a different length
-                            // than unprocessed_user_suffix.len(), since write_str guarentees at
-                            // least that an integer number of code points are written, and we
-                            // only have one code point to offer
-                            debug_assert_eq!(self.unprocessed_user_suffix.len(), written);
-
-                            self.unprocessed_user_suffix.clear();
-
-                            // Subtract current_len, since we already told the user that those bytes
-                            // were written during a previous write call.
-                            Ok(written - current_length)
-                        }
-                        result => {
-                            // Failed to write the new bytes. We can't record them as being
-                            // written, so truncate the unprocessed_user_suffix back to its
-                            // original size
-                            self.unprocessed_user_suffix.truncate(current_length);
-                            result
-                        }
-                    },
-                    Ok(_) => unreachable!(
-                        "unprocessed_user_suffix had bytes from more than one code point: {:?}",
-                        self.unprocessed_user_suffix
-                    ),
                 }
             }
         }
