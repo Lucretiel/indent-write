@@ -1,37 +1,5 @@
 use std::fmt;
 
-pub trait IndentableWrite: Sized {
-    fn indent_with_rules(
-        self,
-        prefix: &str,
-        initial_indent: bool,
-    ) -> IndentedWrite<Self>;
-
-    #[inline]
-    fn indent_with(self, prefix: &str) -> IndentedWrite<Self> {
-        self.indent_with_rules(prefix, true)
-    }
-
-    #[inline]
-    fn indent(self) -> IndentedWrite<'static, Self> {
-        self.indent_with("\t")
-    }
-}
-
-impl<W: fmt::Write> IndentableWrite for W {
-    fn indent_with_rules(
-        self,
-        prefix: &str,
-        initial_indent: bool,
-    ) -> IndentedWrite<Self> {
-        IndentedWrite {
-            writer: self,
-            prefix,
-            insert_indent: initial_indent,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct IndentedWrite<'a, W> {
     writer: W,
@@ -72,5 +40,121 @@ impl<'a, W: fmt::Write> fmt::Write for IndentedWrite<'a, W> {
         }
 
         Ok(())
+    }
+}
+
+/// Adapter for writers to indent each line
+///
+/// An `IndentWriter` adapts a [`fmt::Write`] object to insert an indent before
+/// each non-empty line. Specifically, this means it will insert an indent
+/// between each newline when followed by a non-newline.
+///
+/// These writers can be nested to provide increasing levels of indentation.
+///
+/// # Example
+///
+/// ```
+/// # use std::fmt::Write;
+/// use indent_write::fmt::IndentWriter;
+///
+/// let output = String::new();
+///
+/// let mut indented = IndentWriter::new("\t", output);
+///
+/// // Lines will be indented
+/// write!(indented, "Line 1\nLine 2\n");
+///
+/// // Empty lines will not be indented
+/// write!(indented, "\n\nLine 3\n\n");
+///
+/// assert_eq!(indented.get_ref(), "\tLine 1\n\tLine 2\n\n\n\tLine 3\n\n");
+/// ```
+#[derive(Debug, Clone)]
+pub struct IndentWriter<'i, W> {
+    writer: W,
+    indent: &'i str,
+    need_indent: bool,
+}
+
+impl<'i, W: fmt::Write> IndentWriter<'i, W> {
+    /// Create a new IndentWriter.
+    pub fn new(indent: &'i str, writer: W) -> Self {
+        Self {
+            writer,
+            indent,
+            need_indent: true,
+        }
+    }
+
+    /// Extract the writer from the `IndentWriter`, discarding any in-progress
+    /// indent state.
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
+
+    /// Get a reference to the wrapped writer
+    pub fn get_ref(&self) -> &W {
+        &self.writer
+    }
+
+    /// Get the string being used as an indent for each line
+    pub fn indent(&self) -> &'i str {
+        self.indent
+    }
+}
+
+impl<'i, W: fmt::Write> fmt::Write for IndentWriter<'i, W> {
+    fn write_str(&mut self, mut s: &str) -> fmt::Result {
+        loop {
+            match self.need_indent {
+                // We don't need an indent. Scan for the end of the line
+                false => match s.as_bytes().iter().position(|&b| b == b'\n') {
+                    // No end of line in the input; write the entire string
+                    None => break self.writer.write_str(s),
+
+                    // We can see the end of the line. Write up to and including
+                    // that newline, then request an indent
+                    Some(len) => {
+                        let (head, tail) = s.split_at(len + 1);
+                        self.writer.write_str(head)?;
+                        self.need_indent = true;
+                        s = tail;
+                    }
+                },
+                // We need an indent. Scan for the beginning of the next
+                // non-empty line.
+                true => match s.as_bytes().iter().position(|&b| b != b'\n') {
+                    // No non-empty lines in input, write the entire string
+                    None => break self.writer.write_str(s),
+
+                    // We can see the next non-empty line. Write up to the
+                    // beginning of that line, then insert an indent, then
+                    // continue.
+                    Some(len) => {
+                        let (head, tail) = s.split_at(len);
+                        self.writer.write_str(head)?;
+                        self.writer.write_str(self.indent)?;
+                        self.need_indent = false;
+                        s = tail;
+                    }
+                },
+            }
+        }
+    }
+
+    fn write_char(&mut self, c: char) -> fmt::Result {
+        // We need an indent, and this is the start of a non-empty line.
+        // Insert the indent.
+        if self.need_indent && c != '\n' {
+            self.writer.write_str(self.indent)?;
+            self.need_indent = false;
+        }
+
+        // This is the end of a non-empty line. Request an indent.
+        if !self.need_indent && c == '\n' {
+            self.need_indent = true;
+        }
+
+        self.writer.write_char(c)
     }
 }

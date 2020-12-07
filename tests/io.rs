@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::str::from_utf8;
 
-use indent_write::io::IndentableWrite;
+use indent_write::io::IndentWriter;
 
 // This is a wrapper for io::Write that only writes one byte at a time, to test
 // the invariants of IndentableWrite
@@ -10,7 +10,10 @@ struct OneByteAtATime<W>(W);
 
 impl<W: Write> Write for OneByteAtATime<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.write(&buf[..1])
+        match *buf {
+            [] => Ok(0),
+            [b, ..] => self.0.write(&[b]),
+        }
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -18,8 +21,7 @@ impl<W: Write> Write for OneByteAtATime<W> {
     }
 }
 
-const CONTENT: &'static [&'static str] =
-    &["\t😀 😀 😀", "\t\t😀 😀 😀", "\t😀 😀 😀"];
+const CONTENT: &'static [&'static str] = &["\t😀 😀 😀", "\t\t😀 😀 😀", "\t😀 😀 😀"];
 
 // Using a function to wrap a writer, run a standard test and check against expected
 macro_rules! test_harness {
@@ -44,47 +46,39 @@ fn basic_test() {
     let mut dest = Vec::new();
 
     {
-        let writer = &mut dest;
-        let mut indented_dest = writer.indent();
+        let mut writer = IndentWriter::new("\t", &mut dest);
         for line in CONTENT {
-            write!(&mut indented_dest, "{}\n", line).unwrap();
+            writeln!(writer, "{}", line).unwrap();
         }
     }
 
     let result = from_utf8(&dest).expect("Wrote invalid utf8 to dest");
-    assert_eq!(
-        result,
-        "\t\t😀 😀 😀\n\t\t\t😀 😀 😀\n\t\t😀 😀 😀\n"
-    );
+    assert_eq!(result, "\t\t😀 😀 😀\n\t\t\t😀 😀 😀\n\t\t😀 😀 😀\n");
 }
 
 #[test]
 fn test_prefix() {
-    test_harness!(w => w.indent_with("    "), expect: "    \t😀 😀 😀\n    \t\t😀 😀 😀\n    \t😀 😀 😀\n")
-}
-
-#[test]
-fn test_strip_indent() {
-    test_harness!(w => w.indent_with_rules("\t", true, true), expect: "\t😀 😀 😀\n\t😀 😀 😀\n\t😀 😀 😀\n")
+    test_harness!(w => IndentWriter::new("    ", w), expect: "    \t😀 😀 😀\n    \t\t😀 😀 😀\n    \t😀 😀 😀\n")
 }
 
 #[test]
 fn test_multi_indent() {
     let mut dest = Vec::new();
-    write!(&mut dest, "{}\n", "😀 😀 😀").unwrap();
+    writeln!(dest, "{}", "😀 😀 😀").unwrap();
     {
-        let mut indent1 = (&mut dest).indent();
-        write!(&mut indent1, "{}\n", "😀 😀 😀").unwrap();
+        let mut indent1 = IndentWriter::new("\t", &mut dest);
+        writeln!(indent1, "{}", "😀 😀 😀").unwrap();
         {
-            let mut indent2 = (&mut indent1).indent();
-            write!(&mut indent2, "{}\n", "😀 😀 😀").unwrap();
+            let mut indent2 = IndentWriter::new("\t", &mut indent1);
+            writeln!(indent2, "{}", "😀 😀 😀").unwrap();
             {
-                let mut indent3 = (&mut indent2).indent();
-                write!(&mut indent3, "{}\n", "😀 😀 😀").unwrap();
+                let mut indent3 = IndentWriter::new("\t", &mut indent2);
+                writeln!(indent3, "{}", "😀 😀 😀").unwrap();
+                writeln!(indent3, "").unwrap();
             }
-            write!(&mut indent2, "{}\n", "😀 😀 😀").unwrap();
+            writeln!(indent2, "{}", "😀 😀 😀").unwrap();
         }
-        write!(&mut indent1, "{}\n", "😀 😀 😀").unwrap();
+        writeln!(indent1, "{}", "😀 😀 😀").unwrap();
     }
 
     let result = from_utf8(&dest).expect("Wrote invalid utf8 to dest");
@@ -94,6 +88,7 @@ fn test_multi_indent() {
 \t😀 😀 😀
 \t\t😀 😀 😀
 \t\t\t😀 😀 😀
+
 \t\t😀 😀 😀
 \t😀 😀 😀\n"
     )
@@ -114,7 +109,8 @@ fn test_partial_writes() {
 fn test_partial_simple_indent_writes() {
     let mut dest = Vec::new();
     {
-        let mut writer = OneByteAtATime(&mut dest).indent();
+        let writer = OneByteAtATime(&mut dest);
+        let mut writer = IndentWriter::new("\t", writer);
         write!(writer, "{}\n", "Hello, World").unwrap();
         write!(writer, "{}\n", "😀 😀 😀\n😀 😀 😀").unwrap();
     }
@@ -128,7 +124,8 @@ fn test_partial_simple_indent_writes() {
 fn test_partial_simple_indent_writes_inverted() {
     let mut dest = Vec::new();
     {
-        let mut writer = OneByteAtATime((&mut dest).indent());
+        let writer = IndentWriter::new("\t", &mut dest);
+        let mut writer = OneByteAtATime(writer);
         write!(writer, "{}\n", "Hello, World").unwrap();
         write!(writer, "{}\n", "😀 😀 😀\n😀 😀 😀").unwrap();
     }
@@ -142,7 +139,10 @@ fn test_partial_simple_indent_writes_inverted() {
 fn test_partial_writes_combined() {
     let mut dest = Vec::new();
     {
-        let mut writer = OneByteAtATime(OneByteAtATime(&mut dest).indent_with("    "));
+        let writer = OneByteAtATime(&mut dest);
+        let writer = IndentWriter::new("    ", writer);
+        let mut writer = OneByteAtATime(writer);
+
         write!(writer, "{}\n", "Hello, World").unwrap();
         write!(writer, "{}\n", "😀 😀 😀\n😀 😀 😀").unwrap();
     }
@@ -150,25 +150,4 @@ fn test_partial_writes_combined() {
         from_utf8(&dest),
         Ok("    Hello, World\n    😀 😀 😀\n    😀 😀 😀\n")
     );
-}
-
-#[test]
-fn test_edge_case_ordering_1() {
-    // An old version of the code would report success if you submitted 0b1111_0xxx
-    // in a single write, followed by another leading byte. Check this.
-    let mut dest = Vec::new();
-    let content = "😀";
-    let content_bytes = content.as_bytes();
-    {
-        let mut writer = (&mut dest).indent_with("");
-        match writer.write(&content_bytes[..2]) {
-            Ok(count) => assert_eq!(count, 2),
-            Err(err) => panic!("Write shouldn't have failed (error: {:?})", err),
-        }
-        match writer.write(content_bytes) {
-            Ok(count) => panic!("Write shouldn't have succeeded (count: {})", count),
-            Err(err) => assert_eq!(err.kind(), io::ErrorKind::InvalidData),
-        };
-    }
-    assert_eq!(dest, &[]);
 }
