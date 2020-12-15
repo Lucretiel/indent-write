@@ -88,6 +88,28 @@ fn test_multi_indent() {
     )
 }
 
+#[test]
+fn test_skip_next() {
+    let mut dest = String::new();
+
+    writeln!(dest, "😀 😀 😀").unwrap();
+    let mut indent = IndentWriter::new("\t", &mut dest);
+    indent.skip_next_indent();
+    writeln!(indent, "😀 😀 😀").unwrap();
+    writeln!(indent, "😀 😀 😀").unwrap();
+    indent.skip_next_indent();
+    writeln!(indent, "😀 😀 😀").unwrap();
+
+    assert_eq!(
+        dest,
+        "😀 😀 😀
+😀 😀 😀
+\t😀 😀 😀
+😀 😀 😀
+"
+    )
+}
+
 // Technically this doesn't test anything in the crate, it just ensures that OneByteAtATime works
 #[test]
 fn test_partial_writes() {

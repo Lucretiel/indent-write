@@ -61,6 +61,14 @@ impl<'i, W: io::Write> IndentWriter<'i, W> {
         }
     }
 
+    /// If we're currently at the start of a line and would write indentation,
+    /// don't, skip this one and wait until the next one.
+    pub fn skip_next_indent(&mut self) {
+        if let NeedIndent = self.state {
+            self.state = MidLine;
+        }
+    }
+
     /// Extract the writer from the `IndentWriter`, discarding any in-progress
     /// indent state.
     pub fn into_inner(self) -> W {
