@@ -33,7 +33,8 @@ pub struct IndentWriter<'i, W> {
 }
 
 impl<'i, W: fmt::Write> IndentWriter<'i, W> {
-    /// Create a new IndentWriter.
+    /// Create a new [`IndentWriter`].
+    #[inline]
     pub fn new(indent: &'i str, writer: W) -> Self {
         Self {
             writer,
@@ -42,18 +43,48 @@ impl<'i, W: fmt::Write> IndentWriter<'i, W> {
         }
     }
 
+    /// Create a new [`IndentWriter`] which will not add an indent to the first
+    /// written line.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use std::fmt::Write;
+    /// use indent_write::fmt::IndentWriter;
+    ///
+    /// let mut buffer = String::new();
+    /// let mut writer = IndentWriter::new_skip_initial("    ", &mut buffer);
+    ///
+    /// writeln!(writer, "Line 1").unwrap();
+    /// writeln!(writer, "Line 2").unwrap();
+    /// writeln!(writer, "Line 3").unwrap();
+    ///
+    /// assert_eq!(buffer, "Line 1\n    Line 2\n    Line 3\n")
+    /// ```
+    #[inline]
+    pub fn new_skip_initial(indent: &'i str, writer: W) -> Self {
+        Self {
+            writer,
+            indent,
+            need_indent: false,
+        }
+    }
+
     /// Extract the writer from the `IndentWriter`, discarding any in-progress
     /// indent state.
+    #[inline]
     pub fn into_inner(self) -> W {
         self.writer
     }
 
     /// Get a reference to the wrapped writer
+    #[inline]
     pub fn get_ref(&self) -> &W {
         &self.writer
     }
 
     /// Get the string being used as an indent for each line
+    #[inline]
     pub fn indent(&self) -> &'i str {
         self.indent
     }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0
+
+### Added
+
+- Added a new constructor, `new_skip_indent`, to `fmt::IndentWriter` and `io::IndentWriter`. This constructor configures the write to omit the indent on the initial line.
+
 ## 2.0.0
 
 ### Removed

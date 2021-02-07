@@ -105,8 +105,8 @@ fn test_partial_simple_indent_writes() {
     {
         let writer = OneByteAtATime(&mut dest);
         let mut writer = IndentWriter::new("\t", writer);
-        write!(writer, "{}\n", "Hello, World").unwrap();
-        write!(writer, "{}\n", "😀 😀 😀\n😀 😀 😀").unwrap();
+        writeln!(writer, "{}", "Hello, World").unwrap();
+        writeln!(writer, "{}", "😀 😀 😀\n😀 😀 😀").unwrap();
     }
     assert_eq!(dest, "\tHello, World\n\t😀 😀 😀\n\t😀 😀 😀\n");
 }
@@ -117,8 +117,8 @@ fn test_partial_simple_indent_writes_inverted() {
     {
         let writer = IndentWriter::new("\t", &mut dest);
         let mut writer = OneByteAtATime(writer);
-        write!(writer, "{}\n", "Hello, World").unwrap();
-        write!(writer, "{}\n", "😀 😀 😀\n😀 😀 😀").unwrap();
+        writeln!(writer, "{}", "Hello, World").unwrap();
+        writeln!(writer, "{}", "😀 😀 😀\n😀 😀 😀").unwrap();
     }
     assert_eq!(dest, "\tHello, World\n\t😀 😀 😀\n\t😀 😀 😀\n");
 }
@@ -131,8 +131,8 @@ fn test_partial_writes_combined() {
         let writer = IndentWriter::new("    ", writer);
         let mut writer = OneByteAtATime(writer);
 
-        write!(writer, "{}\n", "Hello, World").unwrap();
-        write!(writer, "{}\n", "😀 😀 😀\n😀 😀 😀").unwrap();
+        writeln!(writer, "{}", "Hello, World").unwrap();
+        writeln!(writer, "{}", "😀 😀 😀\n😀 😀 😀").unwrap();
     }
     assert_eq!(dest, "    Hello, World\n    😀 😀 😀\n    😀 😀 😀\n");
 }
