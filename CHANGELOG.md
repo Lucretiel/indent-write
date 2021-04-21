@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.0
+
+### Added
+
+- Added `indentable` module, which contains utilities for indenting objects via `Display`, rather than adapting writers.
+- Add `std` feature, which is enabled by default. When disabled, `indent-write` operates in `no_std` mode.
+
 ## 2.1.0
 
 ### Added

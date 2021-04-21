@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use std::io::{self, Write};
 use std::str::from_utf8;
 

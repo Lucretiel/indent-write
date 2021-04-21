@@ -1,6 +1,6 @@
 [package]
 name = "indent_write"
-version = "2.1.0"
+version = "2.2.0"
 authors = ["Nathan West <Lucretiel@gmail.com>"]
 edition = "2018"
 
@@ -10,3 +10,7 @@ description = "Simple Write adapters to add line indentation"
 repository = "https://github.com/Lucretiel/indent-write"
 
 [dependencies]
+
+[features]
+std = []
+default = ["std"]

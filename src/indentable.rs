@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Formatter, Write};
+use core::fmt::{self, Display, Formatter, Write};
 
 use crate::fmt::IndentWriter;
 

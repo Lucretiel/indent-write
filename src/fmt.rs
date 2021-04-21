@@ -1,4 +1,4 @@
-use std::fmt;
+use core::fmt;
 /// Adapter for writers to indent each line
 ///
 /// An `IndentWriter` adapts a [`fmt::Write`] object to insert an indent before
