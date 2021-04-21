@@ -1,11 +1,13 @@
-//! Simple indentation adapters for [`io::Write`][std::io::Write] and
-//! [`fmt::Write`][std::fmt::Write]. Each adapter wraps a writer object, and
-//! inserts an indentation at the front of each non-empty line written to that
-//! writer.
+//! Simple indentation adapters for [`io::Write`][std::io::Write],
+//! [`fmt::Write`][std::fmt::Write], and [`Display`][std::fmt::Display]. Each
+//! adapter wraps a writer or writable object, and inserts an indentation at
+//! the front of each non-empty line.
 //!
-//! See [`fmt::IndentWriter`] and [`io::IndentWriter`] for examples.
+//! See [`fmt::IndentWriter`], [`io::IndentWriter`], and
+//! [`indentable::Indentable`] for examples.
 
 pub mod fmt;
+pub mod indentable;
 pub mod io;
 
 trait Inspect<T> {
