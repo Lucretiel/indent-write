@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Rewrote `io::IndentWriter` from scratch.
+    - Emits far fewer torn writes (lines are written together with their newlines)
+    - Uses vectored writes to pair indents with their lines
+    - Simpler internal state
+- Add `#[must_use]` to a handful of non-mutating methods
+
+### Compatibility Notes
+
+This change introduced a handful of behavioral changes that are not observable except in extremely unusual edge cases (where you're changing the content you're writing mid-write). It intentionally changes the behavior of the writer (it now uses `write_vectored`) and also adds `#[must_use]` to a handful of sensible places.
+
+Additionally bumped the MSRV to 1.76
+
 ## 2.2.0
 
 ### Added
