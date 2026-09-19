@@ -10,6 +10,10 @@
     - Simpler internal state
 - Add `#[must_use]` to a handful of non-mutating methods
 
+### Internal
+
+- Comment style changes to `fmt.rs`
+
 ### Compatibility Notes
 
 This change introduced a handful of behavioral changes that are not observable except in extremely unusual edge cases (where you're changing the content you're writing mid-write). It intentionally changes the behavior of the writer (it now uses `write_vectored`) and also adds `#[must_use]` to a handful of sensible places.

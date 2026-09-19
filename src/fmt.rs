@@ -1,30 +1,32 @@
 use core::fmt;
-/// Adapter for writers to indent each line
-///
-/// An `IndentWriter` adapts a [`fmt::Write`] object to insert an indent before
-/// each non-empty line. Specifically, this means it will insert an indent
-/// between each newline when followed by a non-newline.
-///
-/// These writers can be nested to provide increasing levels of indentation.
-///
-/// # Example
-///
-/// ```
-/// # use std::fmt::Write;
-/// use indent_write::fmt::IndentWriter;
-///
-/// let output = String::new();
-///
-/// let mut indented = IndentWriter::new("\t", output);
-///
-/// // Lines will be indented
-/// write!(indented, "Line 1\nLine 2\n");
-///
-/// // Empty lines will not be indented
-/// write!(indented, "\n\nLine 3\n\n");
-///
-/// assert_eq!(indented.get_ref(), "\tLine 1\n\tLine 2\n\n\n\tLine 3\n\n");
-/// ```
+/**
+Adapter for writers to indent each line.
+
+An `IndentWriter` adapts a [`fmt::Write`] object to insert an indent before each
+non-empty line. Specifically, this means it will insert an indent between each
+newline when followed by a non-newline.
+
+These writers can be nested to provide increasing levels of indentation.
+
+# Example
+
+```
+# use std::fmt::Write;
+use indent_write::fmt::IndentWriter;
+
+let output = String::new();
+
+let mut indented = IndentWriter::new("\t", output);
+
+// Lines will be indented
+write!(indented, "Line 1\nLine 2\n");
+
+// Empty lines will not be indented
+write!(indented, "\n\nLine 3\n\n");
+
+assert_eq!(indented.get_ref(), "\tLine 1\n\tLine 2\n\n\n\tLine 3\n\n");
+```
+*/
 #[derive(Debug, Clone)]
 pub struct IndentWriter<'i, W> {
     writer: W,
@@ -43,24 +45,26 @@ impl<'i, W: fmt::Write> IndentWriter<'i, W> {
         }
     }
 
-    /// Create a new [`IndentWriter`] which will not add an indent to the first
-    /// written line.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use std::fmt::Write;
-    /// use indent_write::fmt::IndentWriter;
-    ///
-    /// let mut buffer = String::new();
-    /// let mut writer = IndentWriter::new_skip_initial("    ", &mut buffer);
-    ///
-    /// writeln!(writer, "Line 1").unwrap();
-    /// writeln!(writer, "Line 2").unwrap();
-    /// writeln!(writer, "Line 3").unwrap();
-    ///
-    /// assert_eq!(buffer, "Line 1\n    Line 2\n    Line 3\n")
-    /// ```
+    /**
+    Create a new [`IndentWriter`] which will not add an indent to the first
+    written line.
+
+    # Example
+
+    ```
+    # use std::fmt::Write;
+    use indent_write::fmt::IndentWriter;
+
+    let mut buffer = String::new();
+    let mut writer = IndentWriter::new_skip_initial("    ", &mut buffer);
+
+    writeln!(writer, "Line 1").unwrap();
+    writeln!(writer, "Line 2").unwrap();
+    writeln!(writer, "Line 3").unwrap();
+
+    assert_eq!(buffer, "Line 1\n    Line 2\n    Line 3\n")
+    ```
+    */
     #[inline]
     pub fn new_skip_initial(indent: &'i str, writer: W) -> Self {
         Self {
