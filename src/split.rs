@@ -46,18 +46,19 @@ impl<'a, T> Split<'a, T> {
 
     /**
     Update the split by splitting the tail, and joining the left half of that
-    split with the head of this one:
+    split with the head of this one. All elements matching `pred` are joined
+    with the head.
 
     `HHH AAAAABBBBB -> HHHAAAAA BBBBB`
 
-    Returns `None` if pred matches no elements in the tail
+    Returns `None` if no non-matching elements are in the tail.
     */
     #[inline]
     #[must_use]
     pub fn resplit_tail(&self, pred: impl Fn(&T) -> bool) -> Option<Self> {
         self.tail()
             .iter()
-            .position(pred)
+            .position(move |b| !pred(b))
             // Safety: self.point is the length of the head, and tail_point is
             // definitely less than the length of the tail, so their sum is
             // definitely in bounds for the overall slice.

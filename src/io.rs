@@ -19,48 +19,23 @@ const fn is_content(&b: &u8) -> bool {
     b != b'\n'
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum LineClass {
-    /// The line was only content
-    Content,
-
-    /**
-    The line includes at least one newline. This means that iff the *whole* line
-    was written, we need to be ready to start writing an indent if any content
-    appears.
-    */
-    Terminated,
-}
-
 /**
-Get the rest of a line from the front of a buffer, along with an indication if
-it had any amount of terminator. The line may have been torn, so there may be 0
-or more content. Get as much of the line as possible.
+Get the rest of a line from the front of a buffer, along with the number of
+content (non-newline) bytes in the line.
 */
 #[inline]
 #[must_use]
-fn get_line(buf: &[u8]) -> (&[u8], LineClass) {
+fn get_line(buf: &[u8]) -> (&[u8], usize) {
     let cursor = Split::new(buf);
-    match cursor.resplit_tail(is_newline) {
-        None => (buf, LineClass::Content),
-        Some(content) => match content.resplit_tail(is_content) {
-            None => (buf, LineClass::Terminated),
-            Some(line) => (line.head(), LineClass::Terminated),
-        },
-    }
-}
-
-/**
-Get any leading newlines from the buffer (which would be trailing a line-in-
-progress). Returns `None` iff the buffer *starts* with a non-newline character.
-*/
-#[inline]
-#[must_use]
-fn get_leading_newlines(buf: &[u8]) -> Option<&[u8]> {
-    match buf.iter().position(is_content) {
-        None => Some(buf),
-        Some(0) => None,
-        Some(idx) => Some(&buf[..idx]),
+    match cursor.resplit_tail(is_content) {
+        None => (buf, buf.len()),
+        Some(content) => (
+            content
+                .resplit_tail(is_newline)
+                .map(|line| line.head())
+                .unwrap_or(buf),
+            content.head().len(),
+        ),
     }
 }
 
@@ -173,15 +148,14 @@ impl<'i, W> IndentWriter<'i, W> {
 }
 
 impl<'i, W> IndentWriter<'i, W> {
-    /// Get the indent we're currently trying to write, if any. Guaranteed
-    /// to return a non-empty slice, or None.
+    /// Get the indent we're currently trying to write, if any.
     #[inline]
     #[must_use]
-    fn indent_state(&self) -> Option<&'i [u8]> {
+    fn indent_state(&self) -> &'i [u8] {
         self.indent
             .as_bytes()
             .get(self.index_state..)
-            .filter(|b| !b.is_empty())
+            .unwrap_or_default()
     }
 }
 
@@ -193,53 +167,42 @@ impl<'i, W: io::Write> io::Write for IndentWriter<'i, W> {
         // state where we can write_vectored([indent, line])
         loop {
             // Break up here, since that's the default. `continue` is the
-            // exception.
-            break match self.indent_state() {
-                Some(indent) => match get_leading_newlines(buf) {
-                    // If there are leading newlines here, they're a part of
-                    // the previous line. Write them out before attempting to
-                    // write any indent.
-                    Some(leading) => self.writer.write(leading),
-
-                    // This is the normal happy path case: a new, non-empty
-                    // line that we want to prefix with an indent. Do the
-                    // vectored write and update the state appropriately.
-                    None => {
-                        let (line, class) = get_line(buf);
-                        let total_len = line.len() + indent.len();
-                        let written = self
-                            .writer
-                            .write_vectored(&[IoSlice::new(indent), IoSlice::new(line)])?;
-
-                        // Update the state; if this line had a terminator,
-                        // AND we wrote the entire line, reset the state to
-                        // begin writing a new indent.
-                        self.index_state = match (written, class) {
-                            (0, _) => return Ok(0),
-                            (n, LineClass::Terminated) if n >= total_len => 0,
-                            _ => self.index_state.saturating_add(written),
-                        };
-
-                        // Return from this write call only if we successfully
-                        // wrote any user bytes; otherwise, loop around and
-                        // try to write some more. The indent is definitely
-                        // non-empty, so no issues with WriteZero here.
-                        match written.checked_sub(indent.len()) {
-                            None | Some(0) => continue,
-                            Some(buf_written) => Ok(buf_written),
-                        }
-                    }
-                },
-
-                // We tore a write somewhere; finish writing the current line
-                // before we try the indent thing again
-                None => {
-                    let (line, class) = get_line(buf);
+            // exception, for cases where we only write some indent bytes and
+            // need to retry writing user bytes.
+            break match (get_line(buf), self.indent_state()) {
+                // Skip writing an indent if we're in the middle of writing
+                // a line (or if the user data is all newlines, we never want
+                // to prefix newlines with an indent)
+                ((line, content_len), []) | ((line, content_len @ 0), _) => {
                     self.writer.write(line).inspect(|&written| {
-                        if class == LineClass::Terminated && written >= line.len() {
+                        if written > content_len {
                             self.index_state = 0;
                         }
                     })
+                }
+
+                // This is our typical happy path: some indentation preceding a
+                // line. Do a vectored write of the indent + line.
+                ((line, content_len), indent) => {
+                    let written = self
+                        .writer
+                        .write_vectored(&[IoSlice::new(indent), IoSlice::new(line)])?;
+
+                    if written == 0 {
+                        return Ok(0);
+                    }
+
+                    let buf_written = written.saturating_sub(indent.len());
+
+                    self.index_state = match buf_written > content_len {
+                        true => 0,
+                        false => self.index_state.saturating_add(written),
+                    };
+
+                    match buf_written {
+                        0 => continue,
+                        w => Ok(w),
+                    }
                 }
             };
         }
@@ -247,25 +210,14 @@ impl<'i, W: io::Write> io::Write for IndentWriter<'i, W> {
 
     // TODO: specialize write_vectored. Our opportunities to improve upon it
     // are limited, but it's probably worth it anyway in the common case where
-    // lines boundaries lie on entry boundaries.
+    // line boundaries lie on entry boundaries.
 
     fn flush(&mut self) -> io::Result<()> {
-        // If we've written a partial indent, we should try to finish it
-        while let Some(indent) = self.indent_state() {
-            // Don't write a whole new indent, only complete one in progress
-            if indent.len() >= self.indent.len() {
-                break;
-            }
-
-            // Can't use `write_all` because we need to keep the state
-            // consistent in the event of an error.
-            self.index_state = match self.writer.write(indent) {
-                Ok(0) => return Err(io::Error::from(io::ErrorKind::WriteZero)),
-                Ok(n) => self.index_state.saturating_add(n),
-                Err(err) if err.kind() == io::ErrorKind::Interrupted => self.index_state,
-                Err(err) => return Err(err),
-            }
-        }
+        // NOTE: earlier versions of indent flushing tried to finish torn
+        // indents, simulating that indents are buffered internally after they
+        // start. Currently we try to allow for the possibility of inconsistent
+        // user inputs, which means that we *only* try to write more indent
+        // when the user is actively writing a new line.
 
         self.writer.flush()
     }
