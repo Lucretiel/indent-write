@@ -1,4 +1,48 @@
-use core::fmt;
+use core::{fmt, mem};
+
+/**
+Iterator over lines of the input. Distinct from the standard library
+`str.lines()` because it treats a line as ending with *any* quantity of
+newlines.
+ */
+struct Lines<'a> {
+    input: &'a str,
+}
+
+impl<'a> Iterator for Lines<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let newline_idx = match self.input.as_bytes().iter().position(|&b| b == b'\n') {
+            None if self.input.is_empty() => return None,
+            None => return Some(mem::take(&mut self.input)),
+            Some(idx) => idx,
+        };
+
+        // Safety: `newline_idx` is the index of a newline byte, which is
+        // definitely a sound place to split a string
+        let tail = unsafe { self.input.get_unchecked(newline_idx..) };
+        let next_line_idx = match tail.as_bytes().iter().position(|&b| b != b'\n') {
+            None => return Some(mem::take(&mut self.input)),
+            Some(idx) => idx,
+        };
+
+        let point = newline_idx + next_line_idx;
+
+        // Safety: `next_line_idx` is the index of the first byte of `tail`
+        // that is not a newline byte. This means it is either the front
+        // of the string or it immediately follows a newline byte, making it
+        // a sound place to split a string. `tail` is `input[newline_idx..]`,
+        // so their sum is a safe place to split the string as well.
+        let line = unsafe { self.input.get_unchecked(..point) };
+
+        // Safety: see previous
+        self.input = unsafe { self.input.get_unchecked(point..) };
+
+        Some(line)
+    }
+}
+
 /**
 Adapter for writers to indent each line.
 
@@ -95,42 +139,28 @@ impl<'i, W: fmt::Write> IndentWriter<'i, W> {
 }
 
 impl<'i, W: fmt::Write> fmt::Write for IndentWriter<'i, W> {
-    fn write_str(&mut self, mut s: &str) -> fmt::Result {
-        loop {
-            match self.need_indent {
-                // We don't need an indent. Scan for the end of the line
-                false => match s.as_bytes().iter().position(|&b| b == b'\n') {
-                    // No end of line in the input; write the entire string
-                    None => break self.writer.write_str(s),
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let mut lines = Lines { input: s };
 
-                    // We can see the end of the line. Write up to and including
-                    // that newline, then request an indent
-                    Some(len) => {
-                        let (head, tail) = s.split_at(len + 1);
-                        self.writer.write_str(head)?;
-                        self.need_indent = true;
-                        s = tail;
-                    }
-                },
-                // We need an indent. Scan for the beginning of the next
-                // non-empty line.
-                true => match s.as_bytes().iter().position(|&b| b != b'\n') {
-                    // No non-empty lines in input, write the entire string
-                    None => break self.writer.write_str(s),
+        let Some(first_line) = lines.next() else {
+            return Ok(());
+        };
 
-                    // We can see the next non-empty line. Write up to the
-                    // beginning of that line, then insert an indent, then
-                    // continue.
-                    Some(len) => {
-                        let (head, tail) = s.split_at(len);
-                        self.writer.write_str(head)?;
-                        self.writer.write_str(self.indent)?;
-                        self.need_indent = false;
-                        s = tail;
-                    }
-                },
-            }
+        if self.need_indent && !first_line.starts_with("\n") {
+            self.writer.write_str(self.indent)?;
         }
+        self.writer.write_str(first_line)?;
+        self.need_indent = first_line.ends_with("\n");
+
+        // Write out the remaining lines; prefix them all unconditionally with
+        // indents
+        for line in lines {
+            self.writer.write_str(self.indent)?;
+            self.writer.write_str(line)?;
+            self.need_indent = line.ends_with("\n");
+        }
+
+        Ok(())
     }
 
     fn write_char(&mut self, c: char) -> fmt::Result {
@@ -140,8 +170,8 @@ impl<'i, W: fmt::Write> fmt::Write for IndentWriter<'i, W> {
             self.writer.write_str(self.indent)?;
             self.need_indent = false;
         }
-
         // This is the end of a non-empty line. Request an indent.
+
         if !self.need_indent && c == '\n' {
             self.need_indent = true;
         }

@@ -8,7 +8,10 @@
     - Emits far fewer torn writes (lines are written together with their newlines)
     - Uses vectored writes to pair indents with their lines
     - Simpler internal state
+    - Now correctly handles inconsistent `write` calls
+    - `flush` no longer completes partially-written indents
 - Add `#[must_use]` to a handful of non-mutating methods
+- Rewrote internals of `fmt::IndentWriter`. It makes fewer write calls (by making fewer strings splits) and has fewer internal branches.
 
 ### Internal
 
